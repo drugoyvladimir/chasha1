@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Синтезатор медных поющих чаш</title>
+<style>
+  body { background: #121212; color: #eee; font-family: sans-serif; padding: 20px; max-width: 720px; margin: auto; user-select: none; -webkit-user-select: none; }
+  h3 { color: #fbbf24; margin-top: 0; }
+  .p { background: #1e1e1e; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+  .g { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+  .r { display: flex; flex-direction: column; font-size: 13px; gap: 4px; }
+  input { accent-color: #d97706; width: 100%; }
+  button { padding: 12px 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; background: #333; color: #fff; margin-right: 8px; margin-bottom: 8px; font-size: 14px; }
+  .on { background: #059669; }
+  .k { display: flex; gap: 5px; height: 140px; margin-top: 10px; touch-action: none; }
+  .key { flex: 1; background: #2a2a2a; border: 1px solid #444; border-radius: 0 0 8px 8px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding-bottom: 12px; cursor: pointer; }
+  .act { background: #d97706; border-color: #fbbf24; }
+</style>
+</head>
+<body>
+<h3>Синтезатор медных поющих чаш</h3>
+<div class="p g">
+  <div class="r">1-й обертон (x2.78)<input type="range" id="o1" min="0" max="1" step="0.01" value="0.55"></div>
+  <div class="r">2-й обертон (x5.25)<input type="range" id="o2" min="0" max="1" step="0.01" value="0.25"></div>
+  <div class="r">3-й обертон (x8.35)<input type="range" id="o3" min="0" max="1" step="0.01" value="0.1"></div>
+  <div class="r">Пульсация (Detune)<input type="range" id="det" min="0" max="8" step="0.2" value="3"></div>
+  <div class="r">Накат (Attack)<input type="range" id="att" min="0.05" max="2.5" step="0.05" value="0.4"></div>
+  <div class="r">Гул (Release)<input type="range" id="rel" min="1" max="20" step="0.5" value="8"></div>
+</div>
+<div class="p">
+  <button id="hb">Зажим: ВЫКЛ</button>
+  <button id="pb">Сбросить всё</button>
+  <div class="k" id="kbd"></div>
+</div>
+<script>
+const N = [['До',130.8,'a'],['Ре',146.8,'s'],['Ми',164.8,'d'],['Фа',174.6,'f'],['Соль',196,'g'],['Ля',220,'h'],['Си',246.9,'j'],['До2',261.6,'k']];
+let ctx, mst, hold = false;
+const V = {}, hb = document.getElementById('hb');
+
+hb.onclick = () => {
+  hold = !hold;
+  hb.textContent = hold ? 'Зажим: ВКЛ' : 'Зажим: ВЫКЛ';
+  hb.classList.toggle('on', hold);
+  if (!hold) Object.keys(V).forEach(off);
+};
+document.getElementById('pb').onclick = () => Object.keys(V).forEach(off);
+
+function on(i) {
+  if (V[i]) return;
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    mst = ctx.createGain();
+    mst.gain.value = 0.25;
+    mst.connect(ctx.destination);
+  }
+  if (ctx.state === 'suspended') ctx.resume();
+  const f = N[i][1], t = ctx.currentTime, d = +det.value, g = ctx.createGain();
+  g.gain.setValueAtTime(0.001, t);
+  g.gain.linearRampToValueAtTime(1, t + (+att.value));
+  g.connect(mst);
+  const os = [];
+  [[1, 0.9, 0.7], [2.78, +o1.value, 1], [5.25, +o2.value, 1.3], [8.35, +o3.value, 1.6]].forEach(h => {
+    if (h[1] < 0.01) return;
+    const hg = ctx.createGain();
+    hg.gain.value = h[1] * 0.5;
+    hg.connect(g);
+    [f * h[0], f * h[0] + d * h[2]].forEach(fr => {
+      const o = ctx.createOscillator();
+      o.frequency.value = fr;
+      o.connect(hg);
+      o.start(t);
+      os.push(o);
+    });
+  });
+  V[i] = { g, os };
+  document.getElementById('k' + i).classList.add('act');
+}
+
+function off(i) {
+  const v = V[i];
+  if (!v) return;
+  const t = ctx.currentTime, r = +rel.value;
+  v.g.gain.cancelScheduledValues(t);
+  v.g.gain.setValueAtTime(v.g.gain.value, t);
+  v.g.gain.exponentialRampToValueAtTime(0.0001, t + r);
+  setTimeout(() => {
+    v.os.forEach(o => { try { o.stop(); } catch (e) {} });
+    v.g.disconnect();
+  }, r * 1000 + 100);
+  delete V[i];
+  document.getElementById('k' + i).classList.remove('act');
+}
+
+N.forEach((n, i) => {
+  const e = document.createElement('div');
+  e.className = 'key';
+  e.id = 'k' + i;
+  e.innerHTML = `<b>${n[0]}</b><small>${n[2].toUpperCase()}</small>`;
+  e.onpointerdown = (ev) => { ev.preventDefault(); hold ? (V[i] ? off(i) : on(i)) : on(i); };
+  e.onpointerup = e.onpointerleave = e.onpointercancel = () => { if (!hold) off(i); };
+  kbd.appendChild(e);
+});
+
+window.onkeydown = e => { if (e.repeat) return; const i = N.findIndex(n => n[2] === e.key.toLowerCase()); if (i > -1) hold ? (V[i] ? off(i) : on(i)) : on(i); };
+window.onkeyup = e => { if (hold) return; const i = N.findIndex(n => n[2] === e.key.toLowerCase()); if (i > -1) off(i); };
+</script>
+</body>
+</html>
